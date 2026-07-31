@@ -953,6 +953,45 @@ async function gdOpen(){if(!GD.cid){toast(gdErr('no-client-id'));return}
    catch(e){console.error(e);toast(gdErr(e))}}))}
  catch(e){console.error(e);toast(gdErr(e))}}
 window.PP_GD={GD,gdStore,gdErr,gdAuth,gdFetch,gdMultipart,gdUpload,gdList,gdDownload,gdSaveNow,gdOpen};
+const SB={url:'',key:'',secret:'',cli:null};
+try{SB.url=localStorage.getItem('pp-sburl')||'';SB.key=localStorage.getItem('pp-sbkey')||'';SB.secret=localStorage.getItem('pp-sbsec')||''}catch(e){}
+function sbStore(){try{localStorage.setItem('pp-sburl',SB.url||'');localStorage.setItem('pp-sbkey',SB.key||'');localStorage.setItem('pp-sbsec',SB.secret||'')}catch(e){}}
+function sbCfg(u,k,s){const nu=(u||'').trim().replace(/\/+$/,''),nk=(k||'').trim(),ns=(s||'').trim();
+ if(nu!==SB.url||nk!==SB.key){SB.cli=null}SB.url=nu;SB.key=nk;SB.secret=ns;sbStore()}
+function sbReady(){return !!(SB.url&&SB.key&&SB.secret)}
+function cyrb53(str,seed){let h1=0xdeadbeef^seed,h2=0x41c6ce57^seed;for(let i=0;i<str.length;i++){const c=str.charCodeAt(i);h1=Math.imul(h1^c,2654435761);h2=Math.imul(h2^c,1597334677)}h1=Math.imul(h1^(h1>>>16),2246822507);h1^=Math.imul(h2^(h2>>>13),3266489909);h2=Math.imul(h2^(h2>>>16),2246822507);h2^=Math.imul(h1^(h1>>>13),3266489909);return 4294967296*(2097151&h2)+(h1>>>0)}
+function sbHash(s){const a=cyrb53('pp1|'+s,1).toString(16).padStart(14,'0'),b=cyrb53('pp2|'+s,2).toString(16).padStart(14,'0');return 'nb_'+a+b}
+function sbErr(e){const m=String((e&&(e.message||e.error_description||e.msg))||e||'');
+ if(m==='no-config')return 'Add your Supabase URL, key and a notebook name in Settings first';
+ if(m==='no-lib'||/Failed to fetch dynamically|import/i.test(m))return 'Could not load Supabase \u2014 check your connection';
+ if(m==='empty')return 'No notebook found under that name yet \u2014 Save one first';
+ if(/Invalid API key|JWT|apikey/i.test(m))return 'That Supabase key looks wrong \u2014 copy the publishable/anon key';
+ if(/relation .*notebooks.* does not exist|Could not find the table/i.test(m))return 'Run the one-time SQL setup in Supabase first';
+ if(/row-level security|permission|policy/i.test(m))return 'Supabase blocked the write \u2014 run the SQL setup so anon access is allowed';
+ if(/Failed to fetch|NetworkError|network/i.test(m))return 'Could not reach Supabase \u2014 check your connection';
+ return 'Supabase error \u2014 '+m}
+function sbLoadLib(){return new Promise((res,rej)=>{
+ if(window.supabase&&window.supabase.createClient)return res();
+ const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.async=true;
+ s.onload=()=>{(window.supabase&&window.supabase.createClient)?res():rej(new Error('no-lib'))};
+ s.onerror=()=>rej(new Error('no-lib'));document.head.appendChild(s)})}
+async function sbClient(){if(!sbReady())throw new Error('no-config');
+ if(SB.cli)return SB.cli;await sbLoadLib();
+ SB.cli=window.supabase.createClient(SB.url,SB.key,{auth:{persistSession:false}});return SB.cli}
+async function sbSave(){if(!sbReady()){toast(sbErr('no-config'));return null}
+ try{toast('Saving to Supabase\u2026');const c=await sbClient();const b=await buildBackup();
+  const row={id:sbHash(SB.secret),data:JSON.stringify(b),updated:new Date().toISOString()};
+  const{error}=await c.from('notebooks').upsert(row);if(error)throw error;
+  toast('Saved to Supabase \u00b7 '+(SB.secret));return true}
+ catch(e){console.error(e);toast(sbErr(e));return null}}
+async function sbOpen(){if(!sbReady()){toast(sbErr('no-config'));return null}
+ try{toast('Opening from Supabase\u2026');const c=await sbClient();
+  const{data,error}=await c.from('notebooks').select('data,updated').eq('id',sbHash(SB.secret)).maybeSingle();
+  if(error)throw error;if(!data||!data.data)throw new Error('empty');
+  importFile(new Blob([data.data],{type:'application/json'}));return true}
+ catch(e){console.error(e);toast(sbErr(e));return null}}
+const SB_SQL="create table if not exists notebooks (id text primary key, data text, updated timestamptz default now());\nalter table notebooks enable row level security;\ndrop policy if exists \"pp access\" on notebooks;\ncreate policy \"pp access\" on notebooks for all to anon using (true) with check (true);";
+window.PP_SB={SB,sbStore,sbCfg,sbReady,sbHash,sbErr,sbClient,sbSave,sbOpen,cyrb53,SB_SQL};
 async function backupsDlg(){const snaps=(await dall('snaps')).sort((a,b)=>b.ts-a.ts);
  const rows=snaps.length?snaps.map(s=>`<div class="brow"><div><b style="font-size:12px">${fdate(s.ts)}</b><div class="xs">${s.papers.length} paper${s.papers.length===1?'':'s'}</div></div><button class="btn sm" data-rs="${s.ts}">Restore</button></div>`).join(''):'<div class="hint" style="padding:8px 0">Snapshots appear here as you work — about every 5 minutes and whenever you leave.</div>';
  const c=dlg(`<div class="dt">${ic('gear')} Backups &amp; data</div>
@@ -968,6 +1007,13 @@ async function backupsDlg(){const snaps=(await dall('snaps')).sort((a,b)=>b.ts-a
  <input id="gdcid" value="${GD.cid}" placeholder="Google client ID (ends in .apps.googleusercontent.com)" spellcheck="false" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink);font-size:12px;margin-bottom:6px">
  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px"><button class="btn sm dark" id="gdsv">${ic('up')||''} Save to Drive</button><button class="btn sm" id="gdop">Open from Drive</button><button class="btn sm" id="gdcn">Connect</button></div>
  <div class="hint" style="margin:4px 0 10px">Keeps one file in your Drive and updates it in place, so you can open the same work on your phone or another computer. Saving and opening are manual \u2014 the most recent save wins, so open before you start editing elsewhere.</div>
+ <div style="font-size:11px;font-weight:600;color:var(--sub);margin:12px 0 5px">SUPABASE \u2014 same notebook, live on every device</div>
+ <div class="hint" style="margin:0 0 6px">One-time setup: create a free project at supabase.com, then <button class="btn sm" id="sbsql">Copy SQL setup</button> and paste it into the project's SQL editor. Then paste your Project URL and publishable (anon) key below.</div>
+ <input id="sburl" value="${SB.url}" placeholder="Project URL (https://xxxx.supabase.co)" spellcheck="false" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink);font-size:12px;margin-bottom:6px">
+ <input id="sbkey" value="${SB.key}" placeholder="Publishable / anon key" spellcheck="false" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink);font-size:12px;margin-bottom:6px">
+ <input id="sbsec" value="${SB.secret}" placeholder="Notebook name / secret (same on every device)" spellcheck="false" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--line2);border-radius:7px;background:var(--card);color:var(--ink);font-size:12px;margin-bottom:6px">
+ <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:4px"><button class="btn sm dark" id="sbsv">${ic('up')||''} Save to Supabase</button><button class="btn sm" id="sbop">Open from Supabase</button></div>
+ <div class="hint" style="margin:4px 0 10px">Any device with the same notebook name sees the same notes. Saving and opening are manual \u2014 the most recent save wins, so open before you start editing elsewhere. Use a long, private notebook name; anyone who knows it can read these notes, so keep patient-identifiable material out.</div>
  <div style="font-size:11px;font-weight:600;color:var(--sub)">SNAPSHOTS ON THIS DEVICE</div>${rows}
  <div class="dbtns"><button class="btn" id="bcl">Close</button></div>`);
  c.querySelector('#bcl').addEventListener('click',closeDlg);
@@ -984,6 +1030,12 @@ async function backupsDlg(){const snaps=(await dall('snaps')).sort((a,b)=>b.ts-a
  c.querySelector('#gdcn').addEventListener('click',async()=>{gdSync();try{await gdAuth(true);toast('Connected to Google Drive')}catch(e){toast(gdErr(e))}});
  c.querySelector('#gdsv').addEventListener('click',()=>{gdSync();gdSaveNow()});
  c.querySelector('#gdop').addEventListener('click',()=>{gdSync();gdOpen()});
+ const sbSync=()=>sbCfg(c.querySelector('#sburl').value,c.querySelector('#sbkey').value,c.querySelector('#sbsec').value);
+ ['#sburl','#sbkey','#sbsec'].forEach(id=>c.querySelector(id).addEventListener('change',()=>{sbSync();toast('Supabase settings saved')}));
+ c.querySelector('#sbsql').addEventListener('click',()=>{const sql=SB_SQL.replace(/\\n/g,'\n');
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(sql).then(()=>toast('SQL copied \u2014 paste it into Supabase'),()=>toast('Copy failed'));else toast('Copy not available')});
+ c.querySelector('#sbsv').addEventListener('click',()=>{sbSync();sbSave()});
+ c.querySelector('#sbop').addEventListener('click',()=>{sbSync();sbOpen()});
  c.querySelectorAll('[data-rs]').forEach(b=>b.addEventListener('click',()=>{const s=snaps.find(x=>x.ts===Number(b.dataset.rs));if(s)restoreDlg({schema:'pages-backup',papers:s.papers,exported:s.ts})}))}
 /* ---------- export ---------- */
 const EXP={scope:'paper'};
