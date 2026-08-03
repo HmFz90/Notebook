@@ -1,3 +1,3 @@
 url: https://anbrtuozydmvsculpsvn.supabase.co
 key: sb_publishable_QzCydfMfEUURIoceE1Rh0w_dktB0aCS
-notebooks: All,Shoulder, Humerus, Elbow, Forearm, Wrist,Hand,Hip,Femur,Knee,Shin,Ankle,Foot Hip
+notebooks: All,Shoulder, Humerus, Elbow, Forearm, Wrist,Hand,Hip,Femur,Knee,Leg,Ankle,Foot
